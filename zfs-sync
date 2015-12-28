@@ -12,14 +12,13 @@
 # Version 1.1.0
 #
 # Authors:
-#  - Kevin van Zonneveld (http://kvz.io)
+#  - Travis Osterman (travis@osterman.co)
 #
 # Usage:
 #  LOG_LEVEL=7 ./main.sh -f /tmp/x -d
 #
 # Licensed under MIT
-# Copyright (c) 2013 Kevin van Zonneveld (http://kvz.io)
-
+#   TBD
 ### Source file for auth
 #####################################################################
 # TODO ... only if keyring is installed and directories exist
@@ -34,6 +33,7 @@ source "/root/.ssh/.keychain/$HOSTNAME-sh-gpg" > /dev/null 2>&1
 # Environment variables and their defaults
 LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
 
+# todo update will actual options
 # Commandline options. This defines the usage page, and is used to parse cli
 # opts & defaults from. The parsing is unforgiving so be precise in your syntax
 read -r -d '' usage <<-'EOF'
@@ -145,6 +145,7 @@ if [ $# -gt 3 ]
     help
 fi
 
+# three params from command line
 LOCAL_FS="$1";
 REMOTE_URI="$2";
 REMOTE_FS="$3"
@@ -198,18 +199,22 @@ fi
 # alert "Should be corrected immediately, therefore notify staff who can fix the problem. An example would be the loss of a primary ISP connection."
 # emergency "A \"panic\" condition usually affecting multiple apps/servers/sites. At this level it would usually notify all tech staff on call."
 
+# get the current timestamp as YYYY-MM-DD-HHMM-SS
+# get local and remote fs converted to reasonable names (e.g. tank/backup -> tank-backup)
 NOW=$(date +%Y-%m-%d-%H%M-%S)
-# echo ${NOW}
 LOCAL_FS_NAME=$(echo "$LOCAL_FS" | sed 's:/:-:g')
 REMOTE_FS_NAME=$(echo "$REMOTE_FS" | sed 's:/:-:g')
-# echo ${LOCAL_FS_NAME}
-# echo ${REMOTE_FS_NAME}
 
+# set zfs-sync home and ensure it exists
 ZFS_SYNC_HOME="${HOME}/.zfs-sync"
 if [ ! -d "${ZFS_SYNC_HOME}" ]; then
   mkdir "${ZFS_SYNC_HOME}"
 fi
 
+# ensure that a sync file exists
+# one sync file per localfs-remotefs combination
+# todo I do not handle syncing one local fs to two different remote server servers but with the same file structure
+# e.g. tank/home backup@server1 tank/backup and tank/home nate@server2 tank/backup would fail
 SYNC_FILE="${ZFS_SYNC_HOME}/${LOCAL_FS_NAME}.${REMOTE_FS_NAME}.txt"
 FULL=false
 if [ ! -f "${SYNC_FILE}" ]; then
@@ -221,20 +226,32 @@ fi
 
 # take the snapshot
 SNAPNAME="${LOCAL_FS}@${NOW}"
-SNAPSHOT="zfs snapshot -r ${SNAPNAME}"
-info "creating snapshot ${SNAPSHOT}"
-${SNAPSHOT}
+SNAPCMD="zfs snapshot -r ${SNAPNAME}"
+info "creating snapshot ${SNAPCMD}"
+${SNAPCMD}
 
+SUCCESS=false
 if [ ${FULL} = true ]
 then
   info "full backup"
+  # todo silence output of command like below
+  zfs send -R "${SNAPNAME}" | ssh "${REMOTE_URI}" /sbin/zfs receive -Fduv "${REMOTE_FS}" && SUCCESS=true
 else
   info "incremental backup"
   LASTSNAP=$(tail -n 1 ${SYNC_FILE})
   info "last snap ${LASTSNAP}"
-
+  # todo make output suppress based on log level chosen
+  zfs send -R -i "${LASTSNAP}" "${SNAPNAME}" 2> "${ZFS_SYNC_HOME}/log.txt" | ssh -q "${REMOTE_URI}" /sbin/zfs receive -Fduv "${REMOTE_FS}" 1>/dev/null && SUCCESS=true
 fi
 
-# if everything worked
-# echo "${SNAPNAME}" >> ${SYNC_FILE}
+if [ "${SUCCESS}" = true ]
+then
+  # if everything worked
+  echo "${SNAPNAME}" >> ${SYNC_FILE}
+  info "everything worked"
+  exit 0
+else
+  error "something failed"
+  exit
+fi
 
