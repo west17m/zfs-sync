@@ -7,7 +7,7 @@ This is a wrapper for the zfs send/receive combination of commands.  The goal is
 LOG_LEVEL=[0-7] zfs-sync LOCAL_ZFS REMOTE_URI_LOGIN REMOTE_ZFS
 
 ## Example
-LOG_LEVEL=5 zfs-sync "tank/home" "backup@server2.tld.com" "tank/backup/server1.tld.com"
+LOG_LEVEL=6 zfs-sync "tank/home" "backup@server2.tld.com" "tank/backup/server1.tld.com"
 
 The above will snapshot and send the contents of server1.tld.com's tank/home filesystem to server2.tld.com.  On the first run, it will be the entire snapshot.  On subsequent runs, it will be only the changes.
 
