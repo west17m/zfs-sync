@@ -38,7 +38,7 @@ HELP=false
 INCREMENTAL=false
 SSH_OPTS=""
 EMAIL=""
-LOG_LEVEL=5
+LOG_LEVEL=6
 
 #####################################################################
 ### Source files for auth
