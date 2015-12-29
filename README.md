@@ -4,7 +4,7 @@ This is a wrapper for the zfs send/receive combination of commands.  The goal is
 
 ## Usage
 
-LOG_LEVEL=[0-7] zfs-sync LOCAL_ZFS REMOTE_URI_LOGIN REMOTE_ZFS
+zfs-sync LOCAL_ZFS REMOTE_URI_LOGIN REMOTE_ZFS
 
 ## Example
 zfs-sync "tank/home" "backup@server2.tld.com" "tank/backup/server1.tld.com"
