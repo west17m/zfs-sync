@@ -1,47 +1,69 @@
 #!/usr/bin/env bash
+#####################################################################
+#
+# Usage:
+#  zfs-sync "tank/home" "backup@server2.tld.com" "tank/backup/server1.tld.com"
+#
+# see https://github.com/west17m/zfs-sync for latest version
+#
+# Version 0.0.3
+#
+# Authors:
+#  - Travis Osterman (travis@osterman.co)
+#
+#
+# License
+#   TBD
 #
 # Thanks to:
 #  - https://github.com/kvz/bash3boilerplate
 #  - http://www.funtoo.org/Keychain
 #
-# Version 0.0.1
-#
-# Authors:
-#  - Travis Osterman (travis@osterman.co)
-#
-# Usage:
-#  LOG_LEVEL=6 zfs-sync "tank/home" "backup@server2.tld.com" "tank/backup/server1.tld.com"
-#
-# License
-#   TBD
-
-ZFS_SYNC_HOME="/root/.zfs-sync"
-
-
-### Source file for auth
 #####################################################################
-# TODO ... only if keyring is installed and directories exist
-# source variable
-source "/root/.ssh/.keychain/$HOSTNAME-sh" > /dev/null 2>&1
-source "/root/.ssh/.keychain/$HOSTNAME-sh-gpg" > /dev/null 2>&1
 
+# Local configuration
+ZFS_SYNC_HOME="/root/.zfs-sync"
+TEMP_FILE=${ZFS_SYNC_HOME}/last-sync.log
 
-### Configuration
+#####################################################################
+### Default Configuration
 #####################################################################
 
 # Environment variables and their defaults
-LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
+VERBOSE=false
+DEBUG=false
+FULL=false
+FALLBACK=false
+HELP=false
+INCREMENTAL=false
+SSH_OPTS=""
+EMAIL=""
+LOG_LEVEL=5
 
-# todo update will actual options
-# Commandline options. This defines the usage page, and is used to parse cli
-# opts & defaults from. The parsing is unforgiving so be precise in your syntax
-read -r -d '' usage <<-'EOF'
-  -f   [arg] Filename to process. Required.
-  -t   [arg] Location of tempfile. Default="/tmp/bar"
-  -d         Enables debug mode
-  -h         This page
-EOF
+#####################################################################
+### Source files for auth
+#####################################################################
+if [ -d /root/.ssh/.keychain ]
+then
+  if [ -f "/root/.ssh/.keychain/$HOSTNAME-sh" ]
+  then
+    source "/root/.ssh/.keychain/$HOSTNAME-sh" > /dev/null 2>&1
+  fi
+  if [ -f "/root/.ssh/.keychain/$HOSTNAME-sh-gpg" ]
+  then
+    source "/root/.ssh/.keychain/$HOSTNAME-sh-gpg" > /dev/null 2>&1
+  fi
+else
+  notice "keychain is not installed, may not be able to auth from script"
+fi
 
+#####################################################################
+### SHOULD NOT NEED TO EDIT BELOW HERE                            ###
+#####################################################################
+
+#####################################################################
+### Magic variables
+#####################################################################
 # Set magic variables for current file and its directory. 
 # BASH_SOURCE[0] is used so we can display the current file even if it is sourced by a parent script.
 # If you need the script that was executed, consider using $0 instead.
@@ -52,10 +74,13 @@ __root="$(cd "$(dirname "${__dir}")" && pwd)" # <-- change this
 __base="$(basename ${__file} .sh)"
 
 
-
+#####################################################################
 ### Functions
 #####################################################################
 
+#
+# COLOR
+#
 function _fmt ()      {
   local color_ok="\x1b[32m"
   local color_bad="\x1b[31m"
@@ -72,15 +97,28 @@ function _fmt ()      {
   fi
   echo -e "$(date -u +"%Y-%m-%d %H:%M:%S UTC") ${color}$(printf "[%9s]" ${1})${color_reset}";
 }
-function emergency () {                             echo "$(_fmt emergency) ${@}" 1>&2 || true; exit 1; }
-function alert ()     { [ "${LOG_LEVEL}" -ge 1 ] && echo "$(_fmt alert) ${@}" 1>&2 || true; }
-function critical ()  { [ "${LOG_LEVEL}" -ge 2 ] && echo "$(_fmt critical) ${@}" 1>&2 || true; }
-function error ()     { [ "${LOG_LEVEL}" -ge 3 ] && echo "$(_fmt error) ${@}" 1>&2 || true; }
-function warning ()   { [ "${LOG_LEVEL}" -ge 4 ] && echo "$(_fmt warning) ${@}" 1>&2 || true; }
-function notice ()    { [ "${LOG_LEVEL}" -ge 5 ] && echo "$(_fmt notice) ${@}" 1>&2 || true; }
-function info ()      { [ "${LOG_LEVEL}" -ge 6 ] && echo "$(_fmt info) ${@}" 1>&2 || true; }
-function debug ()     { [ "${LOG_LEVEL}" -ge 7 ] && echo "$(_fmt debug) ${@}" 1>&2 || true; }
 
+#
+# LOGGING
+#
+# stdout based on log level, but call log regardless
+function emergency () {                             echo "$(_fmt emergency) ${@}" 1>&2 || true; log "${@}"; terminate; }
+function alert ()     { [ "${LOG_LEVEL}" -ge 1 ] && echo "$(_fmt alert) ${@}" 1>&2 || true;     log "${@}"; }
+function critical ()  { [ "${LOG_LEVEL}" -ge 2 ] && echo "$(_fmt critical) ${@}" 1>&2 || true;  log "${@}"; }
+function error ()     { [ "${LOG_LEVEL}" -ge 3 ] && echo "$(_fmt error) ${@}" 1>&2 || true;     log "${@}"; }
+function warning ()   { [ "${LOG_LEVEL}" -ge 4 ] && echo "$(_fmt warning) ${@}" 1>&2 || true;   log "${@}"; }
+function notice ()    { [ "${LOG_LEVEL}" -ge 5 ] && echo "$(_fmt notice) ${@}" 1>&2 || true;    log "${@}"; }
+function info ()      { [ "${LOG_LEVEL}" -ge 6 ] && echo "$(_fmt info) ${@}" 1>&2 || true;      log "${@}"; }
+function debug ()     { [ "${LOG_LEVEL}" -ge 7 ] && echo "$(_fmt debug) ${@}" 1>&2 || true;     log "${@}"; }
+
+# log all messges to the log file (so these can be displayed for non-zero exit status)
+function log()	      { echo -e "${@}" >> ${TEMP_FILE} || true; }
+function terminate()  { set +o xtrace; div; cat ${TEMP_FILE}; div; exit 1; }
+function div()        { echo -e "------------------------------------------------------------------------"; }
+
+#
+# HELP
+#
 function help () {
   set +o xtrace
   echo -e "${__base}: snapshot and send a zfs filesystem to another host"
@@ -88,7 +126,7 @@ function help () {
   echo -e "\t${__base}: [options] local-filesystem remote-server remote-filesystem"
   echo -e "Options: -[vdfFhies]"
   echo -e "\t[ --verbose           ] [ --debug]            [ --help]"
-  echo -e "\t[ --ssh-opts <string> ] [ --email <address> ]"
+  echo -e "\t[ --ssh-opts <string> ] [ --email <address> ] [ --log-level (0-7)]"
   exit 1
 }
 
@@ -97,26 +135,17 @@ function cleanup_before_exit () {
 }
 trap cleanup_before_exit EXIT
 
-
+#####################################################################
 ### Parse commandline options
 #####################################################################
 
-TEMP=`getopt -o vdhse: --long verbose,debug,full,fallback,help,incremental,email,ssh-opts: \
-             -n "${__base}" -- "$@"`
+TEMP=`getopt -o vdh: --long verbose,debug,help,email:,ssh-opts:,log-level: -n "${__base}" -- "$@"`
 
 if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
 
 # Note the quotes around `$TEMP': they are essential!
 eval set -- "$TEMP"
 
-VERBOSE=false
-DEBUG=false
-FULL=false
-FALLBACK=false
-HELP=false
-INCREMENTAL=false
-SSH_OPTS=""
-EMAIL=""
 while true; do
   case "$1" in
     -v | --verbose ) VERBOSE=true; shift ;;
@@ -124,11 +153,15 @@ while true; do
     -h | --help ) HELP=true; shift ;;
     -s | --ssh-opts ) SSH_OPTS="$2"; shift 2 ;;
     -e | --email ) EMAIL="$2"; shift 2 ;;
+    -l | --log-level ) LOG_LEVEL="$2"; shift 2 ;;
     -- ) shift; break ;;
     * ) break ;;
   esac
 done
 
+#####################################################################
+### Validation
+#####################################################################
 
 set -o errexit  # error on exit
 set -o nounset  # no undeclared variables
@@ -143,14 +176,21 @@ fi
 # check argument param count
 if [ $# -lt 3 ]
   then
-    error "Expected 3 arguments"
+    error "Expected 3 arguments, got $#"
     help
 fi
 
 if [ $# -gt 3 ]
   then
-    error "Expected 3 arguments"
+    error "Expected 3 arguments, got $#"
     help
+fi
+
+# if email
+if [ -n "${EMAIL}" ]
+  then
+  error "--email param is not defined yet, sorry"
+  help
 fi
 
 # three params from command line
@@ -158,6 +198,7 @@ LOCAL_FS="$1";
 REMOTE_URI="$2";
 REMOTE_FS="$3"
 
+#####################################################################
 ### Switches (like -d for debugmode, -h for showing helppage)
 #####################################################################
 
@@ -174,13 +215,15 @@ if [ "${HELP}" = "true" ]; then
 fi
 
 
-### Validation (decide what's required for running your script and error out)
+#####################################################################
+### Required variables
 #####################################################################
 
 # [ -z "${arg_f}" ]     && help      "Setting a filename with -f is required"
-[ -z "${LOG_LEVEL}" ] && emergency "Cannot continue without LOG_LEVEL. "
+# [ -z "${LOG_LEVEL}" ] && emergency "Cannot continue without LOG_LEVEL. "
 
 
+#####################################################################
 ### Runtime
 #####################################################################
 
@@ -207,15 +250,34 @@ fi
 # alert "Should be corrected immediately, therefore notify staff who can fix the problem. An example would be the loss of a primary ISP connection."
 # emergency "A \"panic\" condition usually affecting multiple apps/servers/sites. At this level it would usually notify all tech staff on call."
 
+#
+# LOG FILE
+#
+if [ -f ${TEMP_FILE} ]
+then
+  rm ${TEMP_FILE}
+fi
+
+touch ${TEMP_FILE}
+
+debug "starting ${__base}"
+
 # get the current timestamp as YYYY-MM-DD-HHMM-SS
 # get local and remote fs converted to reasonable names (e.g. tank/backup -> tank-backup)
 NOW=$(date +%Y-%m-%d-%H%M-%S)
+debug "determined now to be ${NOW}"
+
 LOCAL_FS_NAME=$(echo "$LOCAL_FS" | sed 's:/:-:g')
+debug "using ${LOCAL_FS_NAME} instead of ${LOCAL_FS}"
+
 REMOTE_FS_NAME=$(echo "$REMOTE_FS" | sed 's:/:-:g')
+debug "using ${REMOTE_FS_NAME} instead of ${REMOTE_FS}"
 
 # set zfs-sync home and ensure it exists
 if [ ! -d "${ZFS_SYNC_HOME}" ]; then
-  mkdir "${ZFS_SYNC_HOME}" || error "cannot mkdir ${ZFS_SYNC_HOME}"; exit 1
+  debug "ZFS_SYNC_HOME does not exist"
+  mkdir "${ZFS_SYNC_HOME}" || $(error "cannot mkdir ${ZFS_SYNC_HOME}"; terminate;)
+  debug "created ZFS_SYNC_HOME dir"
 fi
 
 # ensure that a sync file exists
@@ -225,40 +287,60 @@ fi
 SYNC_FILE="${ZFS_SYNC_HOME}/${LOCAL_FS_NAME}.${REMOTE_FS_NAME}.txt"
 FULL=false
 if [ ! -f "${SYNC_FILE}" ]; then
-  touch ${SYNC_FILE}
+  debug "sync file ${SYNC_FILE} does not exist"
+  touch ${SYNC_FILE} || $(error "cannot create ${SYNC_FILE}"; terminate;)
+  debug "sync file ${SYNC_FILE} created"
 fi
 
 # if the file is empty, then you'll need a full backup
-[ -s "${SYNC_FILE}" ] || FULL=true # if there was no file, then perform a full backup
+if [ -s "${SYNC_FILE}" ]
+then
+  debug "sync file is not empty so we'll try an incremental backup"
+else
+  FULL=true
+  info "this will be a full backup as no previous sync file was found"
+fi
 
 # take the snapshot
 SNAPNAME="${LOCAL_FS}@${NOW}"
 SNAPCMD="zfs snapshot -r ${SNAPNAME}"
-info "creating snapshot ${SNAPCMD}"
-${SNAPCMD}
+debug "creating snapshot ${SNAPCMD}"
+${SNAPCMD} || $(cat ${TEMP_FILE}.1 >> ${TEMP_FILE}; error "unable to create snapshot ${SNAPNAME} with command ${SNAPCMD}"; terminate;)
+debug "successfully created snapshot"
 
 SUCCESS=false
 if [ ${FULL} = true ]
 then
-  info "full backup"
+  debug "performing full backup ... this may take a while"
+  debug "starting backup at $(date)"
   # todo silence output of command like below
-  zfs send -R "${SNAPNAME}" | ssh "${REMOTE_URI}" /sbin/zfs receive -Fduv "${REMOTE_FS}" && SUCCESS=true
+  zfs send -R "${SNAPNAME}" 2>"${TEMP_FILE}.1" | ssh -q "${REMOTE_URI}" /sbin/zfs receive -Fduv "${REMOTE_FS}" &>"${TEMP_FILE}".2 && SUCCESS=true
+  cat ${TEMP_FILE}.1 >> ${TEMP_FILE};
+  cat ${TEMP_FILE}.2 >> ${TEMP_FILE};
 else
-  info "incremental backup"
+  debug "incremental backup"
+  debug "determining last snapshot"
   LASTSNAP=$(tail -n 1 ${SYNC_FILE})
-  info "last snap ${LASTSNAP}"
+  debug "last snapshot was ${LASTSNAP}"
+  debug "starting backup at $(date)"
   # todo make output suppress based on log level chosen
-  zfs send -R -i "${LASTSNAP}" "${SNAPNAME}" 2> "${ZFS_SYNC_HOME}/log.txt" | ssh -q "${REMOTE_URI}" /sbin/zfs receive -Fduv "${REMOTE_FS}" 1>/dev/null && SUCCESS=true
+  zfs send -R -i "${LASTSNAP}" "${SNAPNAME}" 2>"${TEMP_FILE}.1" | ssh -q "${REMOTE_URI}" /sbin/zfs receive -Fduv "${REMOTE_FS}" &>"${TEMP_FILE}.2" && SUCCESS=true
+  cat ${TEMP_FILE}.1 >> ${TEMP_FILE};
+  cat ${TEMP_FILE}.2 >> ${TEMP_FILE};
 fi
+
+rm -f ${TEMP_FILE}.{1,2} &< /dev/null
 
 if [ "${SUCCESS}" = true ]
 then
   # if everything worked
+  debug "zfs send completed successfully on $(date)"
+  debug "writing successful snapshot to ${SYNC_FILE}"
   echo "${SNAPNAME}" >> ${SYNC_FILE}
-  info "everything worked"
+  debug "everything worked, see ${TEMP_FILE} for full details"
+  [ "${LOG_LEVEL}" -ge 7 ] && set +o xtrace && div && cat ${TEMP_FILE} && div
   exit 0
 else
   error "something failed"
-  exit
+  terminate
 fi
-
