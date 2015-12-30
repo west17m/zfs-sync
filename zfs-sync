@@ -263,7 +263,7 @@ if [ ! -d "${ZFS_SYNC_HOME}" ]; then
   echo "ZFS_SYNC_HOME does not exist"
   mkdir "${ZFS_SYNC_HOME}" || $(echo "cannot mkdir ${ZFS_SYNC_HOME}"; exit 1;)
   touch ${TEMP_FILE}
-  debug "created ZFS_SYNC_HOME dir"
+  debug "created ${ZFS_SYNC_HOME} dir"
 fi
 touch ${TEMP_FILE}
 
