@@ -258,6 +258,13 @@ then
   rm ${TEMP_FILE}
 fi
 
+# set zfs-sync home and ensure it exists
+if [ ! -d "${ZFS_SYNC_HOME}" ]; then
+  echo "ZFS_SYNC_HOME does not exist"
+  mkdir "${ZFS_SYNC_HOME}" || $(echo "cannot mkdir ${ZFS_SYNC_HOME}"; exit 1;)
+  touch ${TEMP_FILE}
+  debug "created ZFS_SYNC_HOME dir"
+fi
 touch ${TEMP_FILE}
 
 debug "starting ${__base}"
@@ -272,13 +279,6 @@ debug "using ${LOCAL_FS_NAME} instead of ${LOCAL_FS}"
 
 REMOTE_FS_NAME=$(echo "$REMOTE_FS" | sed 's:/:-:g')
 debug "using ${REMOTE_FS_NAME} instead of ${REMOTE_FS}"
-
-# set zfs-sync home and ensure it exists
-if [ ! -d "${ZFS_SYNC_HOME}" ]; then
-  debug "ZFS_SYNC_HOME does not exist"
-  mkdir "${ZFS_SYNC_HOME}" || $(error "cannot mkdir ${ZFS_SYNC_HOME}"; terminate;)
-  debug "created ZFS_SYNC_HOME dir"
-fi
 
 # ensure that a sync file exists
 # one sync file per localfs-remotefs combination
